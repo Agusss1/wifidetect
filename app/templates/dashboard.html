@@ -2,48 +2,46 @@
 {% block title %}Dashboard — WiFiDetect{% endblock %}
 
 {% block content %}
+
+<!-- Lockdown banner (visible solo cuando el kill switch está activo) -->
+<div id="lockdownBanner" class="lockdown-banner hidden">
+  <div>
+    <div class="lockdown-banner-text">RED EN MODO LOCKDOWN</div>
+    <div class="lockdown-banner-sub">El acceso a internet está bloqueado para todos los dispositivos excepto el tuyo.</div>
+  </div>
+  <button class="btn btn-restore btn-sm" onclick="deactivateKillSwitch()">Restaurar red</button>
+</div>
+
 <div class="page-header">
-  <h1>Dashboard de Red</h1>
+  <h1>Dashboard</h1>
   <div class="header-actions">
-    <button class="btn btn-primary" onclick="triggerScan()">&#x1F50D; Escanear ahora</button>
-    <button class="btn btn-secondary" onclick="triggerScan(true)">&#x1F9E0; Escaneo profundo</button>
+    <span id="scanIndicator"></span>
+    <button class="btn btn-secondary btn-sm" onclick="triggerScan()">Escanear</button>
+    <button class="btn btn-ghost btn-sm" onclick="triggerScan(true)">Escaneo profundo</button>
+    <div id="killswitchBtn">
+      <button class="btn btn-lockdown btn-sm" onclick="activateKillSwitch()" id="btnLockdown">
+        Cortar internet
+      </button>
+    </div>
     <div class="export-menu">
-      <button class="btn btn-secondary">&#x1F4E5; Exportar &#x25BE;</button>
+      <button class="btn btn-ghost btn-sm">Exportar</button>
       <div class="export-dropdown">
-        <a href="/api/export/csv?days=30">CSV (30 días)</a>
-        <a href="/api/export/pdf?days=30">PDF (30 días)</a>
-        <a href="/api/export/csv?days=7">CSV (7 días)</a>
+        <a href="/api/export/csv?days=30">CSV — 30 días</a>
+        <a href="/api/export/pdf?days=30">PDF — 30 días</a>
+        <a href="/api/export/csv?days=7">CSV — 7 días</a>
       </div>
     </div>
   </div>
 </div>
 
-<!-- Stats cards -->
+<!-- Stats -->
 <div class="stats-grid">
-  <div class="stat-card">
-    <div class="stat-number" id="statTotal">{{ total }}</div>
-    <div class="stat-label">Total dispositivos</div>
-  </div>
-  <div class="stat-card stat-online">
-    <div class="stat-number" id="statOnline">{{ online }}</div>
-    <div class="stat-label">En línea ahora</div>
-  </div>
-  <div class="stat-card stat-known">
-    <div class="stat-number" id="statKnown">{{ known }}</div>
-    <div class="stat-label">Conocidos</div>
-  </div>
-  <div class="stat-card stat-unknown">
-    <div class="stat-number" id="statUnknown">{{ unknown }}</div>
-    <div class="stat-label">Sin clasificar</div>
-  </div>
-  <div class="stat-card stat-blocked">
-    <div class="stat-number" id="statBlocked">{{ blocked }}</div>
-    <div class="stat-label">Bloqueados</div>
-  </div>
-  <div class="stat-card stat-suspicious">
-    <div class="stat-number" id="statSuspicious">{{ suspicious }}</div>
-    <div class="stat-label">Sospechosos</div>
-  </div>
+  <div class="stat-card"><div class="stat-number" id="statTotal">{{ total }}</div><div class="stat-label">Total</div></div>
+  <div class="stat-card stat-online"><div class="stat-number" id="statOnline">{{ online }}</div><div class="stat-label">En línea</div></div>
+  <div class="stat-card stat-known"><div class="stat-number" id="statKnown">{{ known }}</div><div class="stat-label">Conocidos</div></div>
+  <div class="stat-card stat-unknown"><div class="stat-number" id="statUnknown">{{ unknown }}</div><div class="stat-label">Sin clasificar</div></div>
+  <div class="stat-card stat-blocked"><div class="stat-number" id="statBlocked">{{ blocked }}</div><div class="stat-label">Bloqueados</div></div>
+  <div class="stat-card stat-suspicious"><div class="stat-number" id="statSuspicious">{{ suspicious }}</div><div class="stat-label">Sospechosos</div></div>
 </div>
 
 <!-- Device table -->
@@ -76,68 +74,16 @@
         </tr>
       </thead>
       <tbody id="deviceTableBody">
-        <tr><td colspan="8" class="loading">Cargando dispositivos...</td></tr>
+        <tr><td colspan="8" class="loading">Cargando...</td></tr>
       </tbody>
     </table>
   </div>
 </div>
 
-<!-- Integration panels row -->
-<div class="integration-grid">
-
-  <!-- Discord panel -->
-  <div class="card">
-    <div class="card-header">
-      <h2>&#x1F4AC; Discord</h2>
-      <div style="display:flex;align-items:center;gap:10px">
-        <span id="discordStatus" class="discord-status-badge"></span>
-        <label class="toggle-switch" title="Activar/desactivar notificaciones">
-          <input type="checkbox" id="discordEnabled" onchange="saveDiscordToggle()">
-          <span class="toggle-slider"></span>
-        </label>
-      </div>
-    </div>
-    <div style="padding:16px 20px;display:flex;flex-direction:column;gap:12px">
-      <div class="form-group" style="margin:0">
-        <label>URL del Webhook</label>
-        <div style="display:flex;gap:8px;margin-top:6px">
-          <input type="text" id="discordWebhookUrl"
-                 placeholder="https://discord.com/api/webhooks/..."
-                 style="flex:1;font-size:0.82rem">
-          <button class="btn btn-secondary btn-sm" onclick="testDiscord()">&#x1F9EA; Test</button>
-          <button class="btn btn-primary btn-sm" onclick="saveDiscordConfig()">Guardar</button>
-        </div>
-      </div>
-      <div style="font-size:0.78rem;color:var(--text-muted);line-height:1.5">
-        Notifica en Discord cuando: nuevo dispositivo, bloqueo/desbloqueo,
-        MAC sospechosa, port scan detectado, y resumen diario a las 8:00 hs.
-      </div>
-    </div>
-  </div>
-
-  <!-- Modo invisible panel -->
-  <div class="card">
-    <div class="card-header">
-      <h2>&#x1F576; Modo invisible</h2>
-      <button class="btn btn-sm btn-secondary" onclick="openAddExcludedModal()">+ Agregar MAC</button>
-    </div>
-    <div style="padding:0 20px 16px">
-      <div style="font-size:0.78rem;color:var(--text-muted);padding:10px 0 12px">
-        Los dispositivos en esta lista no aparecen en el dashboard,
-        no generan alertas y no se envían a Discord.
-      </div>
-      <div id="excludedMacList">
-        <div class="loading" style="padding:16px 0">Cargando...</div>
-      </div>
-    </div>
-  </div>
-
-</div>
-
-<!-- Charts row -->
+<!-- Charts -->
 <div class="charts-grid">
   <div class="card chart-card">
-    <div class="card-header"><h2>Dispositivos por estado</h2></div>
+    <div class="card-header"><h2>Por estado</h2></div>
     <canvas id="statusChart"></canvas>
   </div>
   <div class="card chart-card">
@@ -145,10 +91,78 @@
     <canvas id="activityChart"></canvas>
   </div>
 </div>
+
+<!-- DNS History -->
+<div class="card">
+  <div class="card-header">
+    <h2>Historial de dominios <small>últimas 24h</small></h2>
+    <div style="display:flex;gap:8px;align-items:center">
+      <select id="dnsDeviceFilter" onchange="loadDnsHistory()" style="background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:5px;font-size:0.8rem">
+        <option value="">Todos los dispositivos</option>
+      </select>
+      <button class="btn btn-ghost btn-sm" onclick="loadDnsHistory()">Actualizar</button>
+    </div>
+  </div>
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr><th>Dominio</th><th>Dispositivo</th><th>Hora</th></tr>
+      </thead>
+      <tbody id="dnsTableBody">
+        <tr><td colspan="3" class="loading">Cargando...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Integration panels -->
+<div class="integration-grid">
+
+  <!-- Discord -->
+  <div class="card">
+    <div class="card-header">
+      <h2>Discord</h2>
+      <div style="display:flex;align-items:center;gap:10px">
+        <span id="discordStatus" class="discord-status-badge off">Inactivo</span>
+        <label class="toggle-switch" title="Activar notificaciones">
+          <input type="checkbox" id="discordEnabled" onchange="saveDiscordToggle()">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+    </div>
+    <div style="padding:14px 18px;display:flex;flex-direction:column;gap:10px">
+      <div class="form-group" style="margin:0">
+        <label>URL del Webhook</label>
+        <div style="display:flex;gap:7px;margin-top:5px">
+          <input type="text" id="discordWebhookUrl" placeholder="https://discord.com/api/webhooks/..." style="flex:1;font-size:0.8rem">
+          <button class="btn btn-ghost btn-sm" onclick="testDiscord()">Test</button>
+          <button class="btn btn-primary btn-sm" onclick="saveDiscordConfig()">Guardar</button>
+        </div>
+      </div>
+      <p style="font-size:0.75rem;color:var(--text-muted)">
+        Notifica al conectarse un dispositivo nuevo, al bloquear/desbloquear, MAC aleatoria,
+        port scan y resumen diario a las 8:00 hs.
+      </p>
+    </div>
+  </div>
+
+  <!-- Modo invisible -->
+  <div class="card">
+    <div class="card-header">
+      <h2>Modo invisible</h2>
+      <button class="btn btn-ghost btn-sm" onclick="openAddExcludedModal()">+ Agregar</button>
+    </div>
+    <div style="padding:14px 18px">
+      <p style="font-size:0.75rem;color:var(--text-muted);margin-bottom:10px">
+        Los dispositivos aquí no aparecen en el dashboard ni se envían a Discord.
+      </p>
+      <div id="excludedMacList"><div class="loading" style="padding:12px 0">Cargando...</div></div>
+    </div>
+  </div>
+
+</div>
 {% endblock %}
 
 {% block scripts %}
-<script>
-  initDashboard();
-</script>
+<script>initDashboard();</script>
 {% endblock %}

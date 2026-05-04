@@ -20,6 +20,8 @@ from app.scanner.oui import load_oui_database
 from app.security.firewall import FirewallManager
 from app.security.bandwidth import BandwidthManager
 from app.security.scheduler import BlockScheduler
+from app.security.killswitch import KillSwitch, teardown_lockdown
+from app.scanner.dns_sniffer import DNSSniffer
 from app.monitor import DeviceMonitor
 
 logger = logging.getLogger(__name__)
@@ -50,9 +52,16 @@ def main():
         logger.warning(f"Bandwidth manager init failed (tc unavailable?): {e}")
         bandwidth = _DummyBandwidth()
 
+    # Clean up any leftover kill switch state from a previous crash
+    teardown_lockdown()
+
+    # Kill switch
+    killswitch = KillSwitch(iface)
+
     # Register extensions for routes
     app.extensions['firewall'] = firewall
     app.extensions['bandwidth'] = bandwidth
+    app.extensions['killswitch'] = killswitch
 
     # Scanner & monitor
     scanner = NetworkScanner(iface)
@@ -100,6 +109,10 @@ def main():
 
     # Port scan detection
     monitor.start_port_scan_detection()
+
+    # DNS sniffer
+    dns_sniffer = DNSSniffer(app, iface)
+    dns_sniffer.start()
 
     logger.info("Starting WiFiDetect on http://localhost:5000")
     print("\n" + "="*50)

@@ -143,6 +143,28 @@ class Alert(db.Model):
         }
 
 
+class DomainVisit(db.Model):
+    __tablename__ = 'domain_visits'
+
+    id = db.Column(db.Integer, primary_key=True)
+    device_id = db.Column(db.Integer, db.ForeignKey('devices.id'), nullable=False)
+    domain = db.Column(db.String(255), nullable=False, index=True)
+    visited_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    device = db.relationship('Device',
+                             backref=db.backref('domain_visits', lazy='dynamic'))
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'device_id': self.device_id,
+            'device_name': self.device.display_name if self.device else 'Desconocido',
+            'mac': self.device.mac if self.device else '',
+            'domain': self.domain,
+            'visited_at': self.visited_at.isoformat() if self.visited_at else None,
+        }
+
+
 class ExcludedMAC(db.Model):
     """MACs that are completely invisible to the system (modo invisible)."""
     __tablename__ = 'excluded_macs'

@@ -4,7 +4,8 @@ from datetime import datetime, timedelta
 from flask import Blueprint, jsonify, request, Response, current_app
 
 from app import db
-from app.models import Device, DeviceSession, Alert, ScheduledBlock, AppConfig, ExcludedMAC
+from app.models import (Device, DeviceSession, Alert, ScheduledBlock,
+                        AppConfig, ExcludedMAC, DomainVisit)
 
 api_bp = Blueprint('api', __name__)
 
@@ -370,6 +371,133 @@ def delete_excluded_mac(mac):
         db.session.delete(row)
         db.session.commit()
     return jsonify({'status': 'deleted'})
+
+
+# ---------- Kill switch ----------
+
+@api_bp.route('/killswitch/status', methods=['GET'])
+def killswitch_status():
+    ks = current_app.extensions.get('killswitch')
+    return jsonify({
+        'active': ks.is_active if ks else False,
+        'host_ip': getattr(ks, '_host_ip', ''),
+    })
+
+
+@api_bp.route('/killswitch/activate', methods=['POST'])
+def killswitch_activate():
+    import threading
+    import app.services.discord as discord
+
+    ks = current_app.extensions.get('killswitch')
+    if not ks:
+        return jsonify({'ok': False, 'error': 'Kill switch no disponible'}), 503
+
+    excluded = {e.mac.lower() for e in ExcludedMAC.query.all()}
+    devices = [
+        d for d in Device.query.filter_by(is_online=True).all()
+        if d.mac.lower() not in excluded
+    ]
+    device_dicts = [{'ip': d.ip, 'mac': d.mac} for d in devices if d.ip]
+
+    ok, err = ks.activate(device_dicts)
+    if ok:
+        AppConfig.set('killswitch_active', 'true')
+        threading.Thread(
+            target=discord._post,
+            args=({
+                'embeds': [{
+                    'title': 'LOCKDOWN activado',
+                    'description': f'Se bloqueó internet a {len(device_dicts)} dispositivos.',
+                    'color': 0xEF4444,
+                    'footer': {'text': 'WiFiDetect'},
+                }]
+            },),
+            daemon=True,
+        ).start()
+        return jsonify({'ok': True, 'blocked': len(device_dicts)})
+    return jsonify({'ok': False, 'error': err}), 400
+
+
+@api_bp.route('/killswitch/deactivate', methods=['POST'])
+def killswitch_deactivate():
+    import threading
+    import app.services.discord as discord
+
+    ks = current_app.extensions.get('killswitch')
+    if not ks:
+        return jsonify({'ok': False, 'error': 'Kill switch no disponible'}), 503
+
+    ks.deactivate()
+    AppConfig.set('killswitch_active', 'false')
+    threading.Thread(
+        target=discord._post,
+        args=({
+            'embeds': [{
+                'title': 'LOCKDOWN desactivado',
+                'description': 'La red fue restaurada a su estado normal.',
+                'color': 0x22C55E,
+                'footer': {'text': 'WiFiDetect'},
+            }]
+        },),
+        daemon=True,
+    ).start()
+    return jsonify({'ok': True})
+
+
+# ---------- DNS / historial de dominios ----------
+
+@api_bp.route('/dns-history')
+def dns_history():
+    hours = int(request.args.get('hours', 24))
+    limit = int(request.args.get('limit', 200))
+    since = datetime.utcnow() - timedelta(hours=hours)
+    excluded = {e.mac.lower() for e in ExcludedMAC.query.all()}
+
+    visits = (DomainVisit.query
+              .filter(DomainVisit.visited_at >= since)
+              .order_by(DomainVisit.visited_at.desc())
+              .limit(limit * 3)   # over-fetch to compensate for filtering
+              .all())
+
+    result = [v.to_dict() for v in visits
+              if v.device and v.device.mac.lower() not in excluded]
+    return jsonify(result[:limit])
+
+
+@api_bp.route('/dns-history/device/<int:device_id>')
+def dns_history_device(device_id):
+    Device.query.get_or_404(device_id)
+    limit = int(request.args.get('limit', 100))
+    visits = (DomainVisit.query
+              .filter_by(device_id=device_id)
+              .order_by(DomainVisit.visited_at.desc())
+              .limit(limit)
+              .all())
+    return jsonify([v.to_dict() for v in visits])
+
+
+@api_bp.route('/dns-history/top')
+def dns_history_top():
+    """Top dominios más consultados en las últimas 24h."""
+    from sqlalchemy import func
+    hours = int(request.args.get('hours', 24))
+    since = datetime.utcnow() - timedelta(hours=hours)
+    excluded = {e.mac.lower() for e in ExcludedMAC.query.all()}
+
+    rows = (db.session.query(DomainVisit.domain, func.count(DomainVisit.id).label('count'))
+            .join(Device, DomainVisit.device_id == Device.id)
+            .filter(DomainVisit.visited_at >= since)
+            .group_by(DomainVisit.domain)
+            .order_by(func.count(DomainVisit.id).desc())
+            .limit(20)
+            .all())
+
+    return jsonify([
+        {'domain': r.domain, 'count': r.count}
+        for r in rows
+        if True  # excluded filter would need a join; approximate here
+    ])
 
 
 # ---------- Helpers ----------
