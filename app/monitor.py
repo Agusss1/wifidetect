@@ -18,7 +18,6 @@ class DeviceMonitor:
         self.scanner = scanner
         self.firewall = firewall
         self._scan_count = 0
-        # port_scan detection: {ip: [timestamps]}
         self._connection_log: dict[str, list[float]] = defaultdict(list)
         self._lock = threading.Lock()
 
@@ -27,10 +26,8 @@ class DeviceMonitor:
     # ------------------------------------------------------------------
 
     def run_scan(self, deep: bool = False):
-        """Execute a full scan and update the database."""
         logger.info("Starting scan cycle...")
         self._scan_count += 1
-        # Every 5th scan do OS detection
         do_deep = deep or (self._scan_count % 5 == 0)
 
         try:
@@ -42,9 +39,19 @@ class DeviceMonitor:
         with self.app.app_context():
             self._process_scan_results(found_devices)
 
+    def _get_excluded_macs(self) -> set:
+        from app.models import ExcludedMAC
+        return {e.mac.lower() for e in ExcludedMAC.query.all()}
+
     def _process_scan_results(self, found_devices: list[dict]):
         from app.models import Device, DeviceSession, Alert
         from app import db
+        import app.services.discord as discord
+
+        excluded = self._get_excluded_macs()
+
+        # Filter excluded MACs completely from found list
+        found_devices = [d for d in found_devices if d['mac'].lower() not in excluded]
 
         now = datetime.utcnow()
         found_macs = {d['mac'] for d in found_devices}
@@ -52,9 +59,10 @@ class DeviceMonitor:
         # Mark offline devices whose sessions need closing
         online_devices = Device.query.filter_by(is_online=True).all()
         for device in online_devices:
+            if device.mac.lower() in excluded:
+                continue
             if device.mac not in found_macs:
                 device.is_online = False
-                # Close open session
                 open_session = DeviceSession.query.filter_by(
                     device_id=device.id, disconnected_at=None
                 ).first()
@@ -70,6 +78,7 @@ class DeviceMonitor:
 
             device = Device.query.filter_by(mac=mac).first()
             is_new = device is None
+            was_random = device.is_random_mac if device else False
 
             if is_new:
                 device = Device(
@@ -86,16 +95,26 @@ class DeviceMonitor:
                 db.session.add(device)
                 db.session.flush()
 
-                # Create alert
                 alert = Alert(
                     type='new_device',
-                    message=f"Nuevo dispositivo detectado: {mac} ({ip}) - {device.vendor}",
+                    message=f"Nuevo dispositivo: {mac} ({ip}) - {device.vendor}",
                     device_mac=mac,
                 )
                 db.session.add(alert)
                 logger.info(f"New device: {mac} @ {ip}")
+
+                # Discord: new device
+                threading.Thread(
+                    target=discord.send_new_device, args=(device,), daemon=True
+                ).start()
+
+                # Discord: suspicious if random MAC
+                if device.is_random_mac:
+                    threading.Thread(
+                        target=discord.send_suspicious, args=(device,), daemon=True
+                    ).start()
+
             else:
-                # Update existing
                 device.ip = ip
                 if info.get('vendor') and info['vendor'] != 'Unknown':
                     device.vendor = info['vendor']
@@ -106,26 +125,30 @@ class DeviceMonitor:
                 if info.get('os_detected'):
                     device.os_detected = info['os_detected']
                     device.os_confidence = info.get('os_confidence', 0)
-                device.is_random_mac = info.get('is_random_mac', False)
+
+                newly_random = info.get('is_random_mac', False)
+                device.is_random_mac = newly_random
+
+                # Newly discovered random MAC on an existing device
+                if newly_random and not was_random and not device.is_known:
+                    threading.Thread(
+                        target=discord.send_suspicious, args=(device,), daemon=True
+                    ).start()
 
             device.is_online = True
             device.last_seen = now
 
-            # Open session if just came online or is new
             if is_new or not DeviceSession.query.filter_by(
                 device_id=device.id, disconnected_at=None
             ).first():
-                session = DeviceSession(device_id=device.id, ip=ip, connected_at=now)
-                db.session.add(session)
+                db.session.add(DeviceSession(device_id=device.id, ip=ip, connected_at=now))
 
-            # Re-apply firewall block if device is flagged
             if device.is_blocked and ip:
                 self.firewall.block_ip(ip)
 
             db.session.commit()
 
-            event = 'new_device' if is_new else 'device_update'
-            self.socketio.emit(event, device.to_dict())
+            self.socketio.emit('new_device' if is_new else 'device_update', device.to_dict())
 
             if is_new:
                 self.socketio.emit('alert', {
@@ -134,8 +157,9 @@ class DeviceMonitor:
                     'mac': mac,
                 })
 
-        # Emit full device list refresh
-        all_devices = [d.to_dict() for d in Device.query.all()]
+        all_devices = [d.to_dict() for d in Device.query.filter(
+            ~Device.mac.in_(excluded)
+        ).all()]
         self.socketio.emit('devices_list', all_devices)
         logger.info(f"Scan complete. {len(found_devices)} devices online.")
 
@@ -144,15 +168,13 @@ class DeviceMonitor:
     # ------------------------------------------------------------------
 
     def start_port_scan_detection(self):
-        """Start a background thread sniffing for port scan patterns."""
-        import threading
         t = threading.Thread(target=self._sniff_loop, daemon=True)
         t.start()
         logger.info("Port scan detection started")
 
     def _sniff_loop(self):
         try:
-            from scapy.all import sniff, TCP
+            from scapy.all import sniff
             sniff(
                 filter="tcp[tcpflags] & (tcp-syn) != 0",
                 prn=self._check_packet,
@@ -171,7 +193,6 @@ class DeviceMonitor:
         now = time.time()
         with self._lock:
             self._connection_log[src].append(now)
-            # Keep only last 60 seconds
             self._connection_log[src] = [
                 t for t in self._connection_log[src] if now - t < 60
             ]
@@ -179,15 +200,22 @@ class DeviceMonitor:
 
         if count >= Config.PORT_SCAN_THRESHOLD:
             with self._lock:
-                self._connection_log[src] = []  # Reset after alert
+                self._connection_log[src] = []
             self._handle_port_scan(src, count)
 
     def _handle_port_scan(self, ip: str, count: int):
         logger.warning(f"Possible port scan from {ip}: {count} SYN packets/min")
         with self.app.app_context():
-            from app.models import Alert, Device
+            from app.models import Alert, Device, ExcludedMAC
             from app import db
+            import app.services.discord as discord
+
+            # Don't alert on excluded MACs
+            excluded = {e.mac.lower() for e in ExcludedMAC.query.all()}
             device = Device.query.filter_by(ip=ip).first()
+            if device and device.mac.lower() in excluded:
+                return
+
             name = device.display_name if device else ip
             alert = Alert(
                 type='port_scan',
@@ -196,8 +224,15 @@ class DeviceMonitor:
             )
             db.session.add(alert)
             db.session.commit()
+
             self.socketio.emit('alert', {
                 'type': 'port_scan',
                 'message': alert.message,
                 'mac': device.mac if device else '',
             })
+
+            threading.Thread(
+                target=discord.send_port_scan,
+                args=(ip, name, count),
+                daemon=True,
+            ).start()

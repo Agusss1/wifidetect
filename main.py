@@ -76,6 +76,17 @@ def main():
         interval = int(AppConfig.get('scan_interval', Config.SCAN_INTERVAL))
 
     scheduler.add_job(scheduled_scan, 'interval', minutes=interval, id='main_scan')
+
+    # Daily summary to Discord at 08:00 local time
+    from app.services.discord import send_daily_summary
+    scheduler.add_job(
+        send_daily_summary,
+        'cron',
+        hour=8, minute=0,
+        id='discord_daily_summary',
+        kwargs={'app': app},
+    )
+
     scheduler.start()
 
     # Initial scan after 3 seconds

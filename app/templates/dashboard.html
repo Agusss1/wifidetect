@@ -82,6 +82,58 @@
   </div>
 </div>
 
+<!-- Integration panels row -->
+<div class="integration-grid">
+
+  <!-- Discord panel -->
+  <div class="card">
+    <div class="card-header">
+      <h2>&#x1F4AC; Discord</h2>
+      <div style="display:flex;align-items:center;gap:10px">
+        <span id="discordStatus" class="discord-status-badge"></span>
+        <label class="toggle-switch" title="Activar/desactivar notificaciones">
+          <input type="checkbox" id="discordEnabled" onchange="saveDiscordToggle()">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+    </div>
+    <div style="padding:16px 20px;display:flex;flex-direction:column;gap:12px">
+      <div class="form-group" style="margin:0">
+        <label>URL del Webhook</label>
+        <div style="display:flex;gap:8px;margin-top:6px">
+          <input type="text" id="discordWebhookUrl"
+                 placeholder="https://discord.com/api/webhooks/..."
+                 style="flex:1;font-size:0.82rem">
+          <button class="btn btn-secondary btn-sm" onclick="testDiscord()">&#x1F9EA; Test</button>
+          <button class="btn btn-primary btn-sm" onclick="saveDiscordConfig()">Guardar</button>
+        </div>
+      </div>
+      <div style="font-size:0.78rem;color:var(--text-muted);line-height:1.5">
+        Notifica en Discord cuando: nuevo dispositivo, bloqueo/desbloqueo,
+        MAC sospechosa, port scan detectado, y resumen diario a las 8:00 hs.
+      </div>
+    </div>
+  </div>
+
+  <!-- Modo invisible panel -->
+  <div class="card">
+    <div class="card-header">
+      <h2>&#x1F576; Modo invisible</h2>
+      <button class="btn btn-sm btn-secondary" onclick="openAddExcludedModal()">+ Agregar MAC</button>
+    </div>
+    <div style="padding:0 20px 16px">
+      <div style="font-size:0.78rem;color:var(--text-muted);padding:10px 0 12px">
+        Los dispositivos en esta lista no aparecen en el dashboard,
+        no generan alertas y no se envían a Discord.
+      </div>
+      <div id="excludedMacList">
+        <div class="loading" style="padding:16px 0">Cargando...</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
 <!-- Charts row -->
 <div class="charts-grid">
   <div class="card chart-card">

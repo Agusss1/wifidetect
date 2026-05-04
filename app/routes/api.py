@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from flask import Blueprint, jsonify, request, Response, current_app
 
 from app import db
-from app.models import Device, DeviceSession, Alert, ScheduledBlock, AppConfig
+from app.models import Device, DeviceSession, Alert, ScheduledBlock, AppConfig, ExcludedMAC
 
 api_bp = Blueprint('api', __name__)
 
@@ -13,8 +13,9 @@ api_bp = Blueprint('api', __name__)
 
 @api_bp.route('/devices')
 def get_devices():
+    excluded = {e.mac.lower() for e in ExcludedMAC.query.all()}
     devices = Device.query.order_by(Device.is_online.desc(), Device.last_seen.desc()).all()
-    return jsonify([d.to_dict() for d in devices])
+    return jsonify([d.to_dict() for d in devices if d.mac.lower() not in excluded])
 
 
 @api_bp.route('/devices/<int:device_id>', methods=['GET'])
@@ -42,23 +43,29 @@ def update_device(device_id):
 
 @api_bp.route('/devices/<int:device_id>/block', methods=['POST'])
 def block_device(device_id):
+    import threading
+    import app.services.discord as discord
     device = Device.query.get_or_404(device_id)
     fw = _get_firewall()
     if device.ip:
         fw.block_ip(device.ip)
     device.is_blocked = True
     db.session.commit()
+    threading.Thread(target=discord.send_blocked, args=(device,), daemon=True).start()
     return jsonify({'status': 'blocked', 'device': device.to_dict()})
 
 
 @api_bp.route('/devices/<int:device_id>/unblock', methods=['POST'])
 def unblock_device(device_id):
+    import threading
+    import app.services.discord as discord
     device = Device.query.get_or_404(device_id)
     fw = _get_firewall()
     if device.ip:
         fw.unblock_ip(device.ip)
     device.is_blocked = False
     db.session.commit()
+    threading.Thread(target=discord.send_unblocked, args=(device,), daemon=True).start()
     return jsonify({'status': 'unblocked', 'device': device.to_dict()})
 
 
@@ -165,7 +172,8 @@ def hourly_stats():
 
 @api_bp.route('/stats/devices')
 def device_stats():
-    devices = Device.query.all()
+    excluded = {e.mac.lower() for e in ExcludedMAC.query.all()}
+    devices = [d for d in Device.query.all() if d.mac.lower() not in excluded]
     return jsonify({
         'total': len(devices),
         'online': sum(1 for d in devices if d.is_online),
@@ -298,6 +306,70 @@ def trigger_scan():
         t.start()
         return jsonify({'status': 'scan started'})
     return jsonify({'status': 'monitor not ready'}), 503
+
+
+# ---------- Discord ----------
+
+@api_bp.route('/discord/config', methods=['GET'])
+def get_discord_config():
+    return jsonify({
+        'webhook_url': AppConfig.get('discord_webhook_url', ''),
+        'enabled': AppConfig.get('discord_enabled', 'false') == 'true',
+    })
+
+
+@api_bp.route('/discord/config', methods=['POST'])
+def set_discord_config():
+    data = request.get_json()
+    if 'webhook_url' in data:
+        AppConfig.set('discord_webhook_url', data['webhook_url'].strip())
+    if 'enabled' in data:
+        AppConfig.set('discord_enabled', 'true' if data['enabled'] else 'false')
+    return jsonify({'status': 'ok'})
+
+
+@api_bp.route('/discord/test', methods=['POST'])
+def test_discord():
+    from app.services.discord import test_webhook
+    data = request.get_json() or {}
+    url = data.get('url') or AppConfig.get('discord_webhook_url', '')
+    if not url:
+        return jsonify({'ok': False, 'error': 'No hay URL configurada'}), 400
+    ok = test_webhook(url)
+    return jsonify({'ok': ok})
+
+
+# ---------- Excluded MACs (modo invisible) ----------
+
+@api_bp.route('/excluded-macs', methods=['GET'])
+def get_excluded_macs():
+    rows = ExcludedMAC.query.order_by(ExcludedMAC.added_at.desc()).all()
+    return jsonify([r.to_dict() for r in rows])
+
+
+@api_bp.route('/excluded-macs', methods=['POST'])
+def add_excluded_mac():
+    data = request.get_json()
+    mac = data.get('mac', '').strip().lower()
+    label = data.get('label', '').strip()
+    if not mac:
+        return jsonify({'error': 'MAC requerida'}), 400
+    existing = ExcludedMAC.query.get(mac)
+    if existing:
+        existing.label = label
+    else:
+        db.session.add(ExcludedMAC(mac=mac, label=label))
+    db.session.commit()
+    return jsonify({'status': 'ok', 'mac': mac}), 201
+
+
+@api_bp.route('/excluded-macs/<path:mac>', methods=['DELETE'])
+def delete_excluded_mac(mac):
+    row = ExcludedMAC.query.get(mac.lower())
+    if row:
+        db.session.delete(row)
+        db.session.commit()
+    return jsonify({'status': 'deleted'})
 
 
 # ---------- Helpers ----------

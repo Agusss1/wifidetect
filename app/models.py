@@ -143,6 +143,22 @@ class Alert(db.Model):
         }
 
 
+class ExcludedMAC(db.Model):
+    """MACs that are completely invisible to the system (modo invisible)."""
+    __tablename__ = 'excluded_macs'
+
+    mac = db.Column(db.String(17), primary_key=True)
+    label = db.Column(db.String(100), default='')
+    added_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            'mac': self.mac,
+            'label': self.label,
+            'added_at': self.added_at.isoformat() if self.added_at else None,
+        }
+
+
 class AppConfig(db.Model):
     __tablename__ = 'app_config'
 

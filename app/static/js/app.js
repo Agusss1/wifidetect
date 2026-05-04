@@ -434,11 +434,159 @@ function esc(str) {
   return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+// ---- Discord config ----
+async function loadDiscordConfig() {
+  try {
+    const cfg = await apiFetch('/api/discord/config');
+    const urlEl = document.getElementById('discordWebhookUrl');
+    const chk = document.getElementById('discordEnabled');
+    const badge = document.getElementById('discordStatus');
+    if (urlEl) urlEl.value = cfg.webhook_url || '';
+    if (chk) chk.checked = cfg.enabled;
+    if (badge) {
+      badge.textContent = cfg.enabled && cfg.webhook_url ? 'Activo' : 'Inactivo';
+      badge.className = `discord-status-badge ${cfg.enabled && cfg.webhook_url ? 'ok' : 'off'}`;
+    }
+  } catch(e) { console.error('loadDiscordConfig:', e); }
+}
+
+async function saveDiscordConfig() {
+  const url = document.getElementById('discordWebhookUrl')?.value.trim() || '';
+  const enabled = document.getElementById('discordEnabled')?.checked ?? false;
+  try {
+    await apiFetch('/api/discord/config', {
+      method: 'POST',
+      body: JSON.stringify({ webhook_url: url, enabled })
+    });
+    showToast('Configuración de Discord guardada', 'success');
+    loadDiscordConfig();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function saveDiscordToggle() {
+  const url = document.getElementById('discordWebhookUrl')?.value.trim() || '';
+  const enabled = document.getElementById('discordEnabled')?.checked ?? false;
+  if (enabled && !url) {
+    showToast('Ingresá la URL del webhook primero', 'error');
+    document.getElementById('discordEnabled').checked = false;
+    return;
+  }
+  await apiFetch('/api/discord/config', {
+    method: 'POST',
+    body: JSON.stringify({ webhook_url: url, enabled })
+  });
+  loadDiscordConfig();
+  showToast(enabled ? 'Discord activado' : 'Discord desactivado', 'success');
+}
+
+async function testDiscord() {
+  const url = document.getElementById('discordWebhookUrl')?.value.trim();
+  if (!url) { showToast('Ingresá la URL primero', 'error'); return; }
+  try {
+    const r = await apiFetch('/api/discord/test', {
+      method: 'POST',
+      body: JSON.stringify({ url })
+    });
+    if (r.ok) showToast('✅ Mensaje de prueba enviado a Discord', 'success');
+    else showToast('❌ No se pudo conectar: ' + (r.error || 'error'), 'error');
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+// ---- Excluded MACs (modo invisible) ----
+async function loadExcludedMacs() {
+  const container = document.getElementById('excludedMacList');
+  if (!container) return;
+  try {
+    const rows = await apiFetch('/api/excluded-macs');
+    if (!rows.length) {
+      container.innerHTML = '<div style="color:var(--text-muted);font-size:0.82rem;padding:8px 0">Sin MACs excluidas.</div>';
+      return;
+    }
+    container.innerHTML = rows.map(r => `
+      <div class="excluded-mac-item">
+        <div>
+          <div class="excluded-mac-label">${esc(r.label || 'Sin etiqueta')}</div>
+          <div class="excluded-mac-addr">${esc(r.mac)}</div>
+        </div>
+        <button class="btn btn-sm btn-danger" onclick="removeExcludedMac('${esc(r.mac)}')">✕</button>
+      </div>
+    `).join('');
+  } catch(e) { container.innerHTML = '<div style="color:var(--red)">Error al cargar</div>'; }
+}
+
+function openAddExcludedModal() {
+  document.getElementById('modalTitle').textContent = '🕶 Agregar MAC al modo invisible';
+  document.getElementById('modalBody').innerHTML = `
+    <div class="form-group">
+      <label>Dirección MAC</label>
+      <input type="text" id="excMac" placeholder="aa:bb:cc:dd:ee:ff" style="font-family:monospace">
+    </div>
+    <div class="form-group">
+      <label>Etiqueta (opcional)</label>
+      <input type="text" id="excLabel" placeholder="Mi notebook, Mi celular...">
+    </div>
+    <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:12px">
+      Este dispositivo no aparecerá en el dashboard, historial ni será enviado a Discord.
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="addExcludedMac()">Agregar</button>
+    </div>
+    <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px">
+      <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:8px">
+        O elegí de los dispositivos detectados:
+      </div>
+      <div id="excPickList">
+        ${allDevices.map(d => `
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border);font-size:0.82rem">
+            <span>${esc(d.display_name)} <span style="color:var(--text-muted)">${esc(d.mac)}</span></span>
+            <button class="btn btn-sm btn-secondary" onclick="quickExclude('${esc(d.mac)}','${esc(d.display_name)}')">Excluir</button>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+  openModal();
+}
+
+async function addExcludedMac() {
+  const mac = document.getElementById('excMac').value.trim().toLowerCase();
+  const label = document.getElementById('excLabel').value.trim();
+  if (!mac) { showToast('Ingresá una MAC', 'error'); return; }
+  try {
+    await apiFetch('/api/excluded-macs', { method: 'POST', body: JSON.stringify({ mac, label }) });
+    showToast('MAC excluida correctamente', 'success');
+    closeModal();
+    loadExcludedMacs();
+    fetchDevices();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function quickExclude(mac, name) {
+  try {
+    await apiFetch('/api/excluded-macs', { method: 'POST', body: JSON.stringify({ mac, label: name }) });
+    showToast(`${name} excluido`, 'success');
+    closeModal();
+    loadExcludedMacs();
+    fetchDevices();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function removeExcludedMac(mac) {
+  try {
+    await apiFetch(`/api/excluded-macs/${encodeURIComponent(mac)}`, { method: 'DELETE' });
+    showToast('MAC removida de la lista', 'success');
+    loadExcludedMacs();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
 // ---- Page initializers ----
 function initDashboard() {
   fetchDevices();
   initCharts();
   refreshAlerts();
+  loadDiscordConfig();
+  loadExcludedMacs();
   // Poll every 30s as fallback
   setInterval(fetchDevices, 30000);
   setInterval(refreshAlerts, 60000);
