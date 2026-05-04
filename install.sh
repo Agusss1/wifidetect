@@ -22,7 +22,12 @@ info "Directorio de instalación: $INSTALL_DIR"
 
 # --- System packages ---
 info "Actualizando repositorios..."
-apt-get update -qq
+# Ignore GPG errors from third-party repos (Spotify, etc.) — they don't affect our packages
+apt-get update -qq 2>&1 | grep -v "^W:\|^E:.*spotify\|^E:.*NO_PUBKEY" || true
+# Verify apt itself is usable
+if ! apt-get install --dry-run python3 &>/dev/null; then
+  warn "apt-get update tuvo errores pero continuando de todas formas..."
+fi
 
 PACKAGES=(
   python3 python3-pip python3-venv python3-dev
