@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — WiFiDetect{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Dashboard de Red</h1>
+  <div class="header-actions">
+    <button class="btn btn-primary" onclick="triggerScan()">&#x1F50D; Escanear ahora</button>
+    <button class="btn btn-secondary" onclick="triggerScan(true)">&#x1F9E0; Escaneo profundo</button>
+    <div class="export-menu">
+      <button class="btn btn-secondary">&#x1F4E5; Exportar &#x25BE;</button>
+      <div class="export-dropdown">
+        <a href="/api/export/csv?days=30">CSV (30 días)</a>
+        <a href="/api/export/pdf?days=30">PDF (30 días)</a>
+        <a href="/api/export/csv?days=7">CSV (7 días)</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Stats cards -->
+<div class="stats-grid">
+  <div class="stat-card">
+    <div class="stat-number" id="statTotal">{{ total }}</div>
+    <div class="stat-label">Total dispositivos</div>
+  </div>
+  <div class="stat-card stat-online">
+    <div class="stat-number" id="statOnline">{{ online }}</div>
+    <div class="stat-label">En línea ahora</div>
+  </div>
+  <div class="stat-card stat-known">
+    <div class="stat-number" id="statKnown">{{ known }}</div>
+    <div class="stat-label">Conocidos</div>
+  </div>
+  <div class="stat-card stat-unknown">
+    <div class="stat-number" id="statUnknown">{{ unknown }}</div>
+    <div class="stat-label">Sin clasificar</div>
+  </div>
+  <div class="stat-card stat-blocked">
+    <div class="stat-number" id="statBlocked">{{ blocked }}</div>
+    <div class="stat-label">Bloqueados</div>
+  </div>
+  <div class="stat-card stat-suspicious">
+    <div class="stat-number" id="statSuspicious">{{ suspicious }}</div>
+    <div class="stat-label">Sospechosos</div>
+  </div>
+</div>
+
+<!-- Device table -->
+<div class="card">
+  <div class="card-header">
+    <h2>Dispositivos conectados</h2>
+    <div class="table-filters">
+      <input type="text" id="filterInput" placeholder="Buscar..." oninput="filterDevices()">
+      <select id="filterStatus" onchange="filterDevices()">
+        <option value="">Todos</option>
+        <option value="known">Conocidos</option>
+        <option value="unknown">Sin clasificar</option>
+        <option value="blocked">Bloqueados</option>
+        <option value="suspicious">Sospechosos</option>
+      </select>
+    </div>
+  </div>
+  <div class="table-wrapper">
+    <table id="deviceTable">
+      <thead>
+        <tr>
+          <th>Estado</th>
+          <th>Nombre</th>
+          <th>IP</th>
+          <th>MAC</th>
+          <th>Fabricante</th>
+          <th>OS</th>
+          <th>Última vez</th>
+          <th>Acciones</th>
+        </tr>
+      </thead>
+      <tbody id="deviceTableBody">
+        <tr><td colspan="8" class="loading">Cargando dispositivos...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Charts row -->
+<div class="charts-grid">
+  <div class="card chart-card">
+    <div class="card-header"><h2>Dispositivos por estado</h2></div>
+    <canvas id="statusChart"></canvas>
+  </div>
+  <div class="card chart-card">
+    <div class="card-header"><h2>Actividad últimas 24h</h2></div>
+    <canvas id="activityChart"></canvas>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  initDashboard();
+</script>
+{% endblock %}

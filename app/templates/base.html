@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}WiFiDetect{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+</head>
+<body>
+  <nav class="navbar">
+    <div class="nav-brand">
+      <span class="nav-icon">&#x1F4F6;</span>
+      <span>WiFiDetect</span>
+    </div>
+    <ul class="nav-links">
+      <li><a href="/" class="{% if request.path == '/' %}active{% endif %}">Dashboard</a></li>
+      <li><a href="/devices" class="{% if request.path.startswith('/devices') %}active{% endif %}">Dispositivos</a></li>
+      <li><a href="#" onclick="openHistory()">Historial</a></li>
+      <li><a href="#" onclick="openSettings()">Ajustes</a></li>
+    </ul>
+    <div class="nav-alerts">
+      <button class="alert-bell" onclick="toggleAlerts()" id="alertBell">
+        &#x1F514; <span id="alertCount" class="badge hidden">0</span>
+      </button>
+    </div>
+  </nav>
+
+  <div id="alertPanel" class="alert-panel hidden">
+    <div class="alert-panel-header">
+      <h3>Alertas</h3>
+      <button onclick="markAlertsRead()">Marcar todo como leído</button>
+      <button onclick="toggleAlerts()">✕</button>
+    </div>
+    <div id="alertList"></div>
+  </div>
+
+  <main class="main-content">
+    {% block content %}{% endblock %}
+  </main>
+
+  <!-- Modal genérico -->
+  <div id="modal" class="modal hidden">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 id="modalTitle">Modal</h3>
+        <button onclick="closeModal()">✕</button>
+      </div>
+      <div id="modalBody"></div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

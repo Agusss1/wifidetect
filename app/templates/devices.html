@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Dispositivos — WiFiDetect{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Gestión de Dispositivos</h1>
+  <button class="btn btn-primary" onclick="triggerScan()">&#x1F50D; Escanear</button>
+</div>
+
+<div class="devices-list">
+  {% for device in devices %}
+  <div class="device-card status-{{ device.status }}" id="devcard-{{ device.id }}">
+    <div class="device-card-indicator"></div>
+    <div class="device-card-body">
+      <div class="device-card-top">
+        <div class="device-name">
+          <span class="online-dot {% if device.is_online %}online{% else %}offline{% endif %}"></span>
+          <strong>{{ device.display_name }}</strong>
+          {% if device.is_random_mac %}<span class="badge-tag badge-warning">MAC aleatoria</span>{% endif %}
+          {% if device.is_blocked %}<span class="badge-tag badge-danger">Bloqueado</span>{% endif %}
+        </div>
+        <div class="device-actions">
+          <button class="btn btn-sm btn-info" onclick="openDeviceModal({{ device.id }})">&#x270F; Editar</button>
+          {% if device.is_blocked %}
+          <button class="btn btn-sm btn-success" onclick="unblockDevice({{ device.id }})">&#x1F513; Desbloquear</button>
+          {% else %}
+          <button class="btn btn-sm btn-danger" onclick="blockDevice({{ device.id }})">&#x1F512; Bloquear</button>
+          {% endif %}
+          {% if device.is_known %}
+          <button class="btn btn-sm btn-secondary" onclick="setKnown({{ device.id }}, false)">&#x274C; Quitar lista blanca</button>
+          {% else %}
+          <button class="btn btn-sm btn-success" onclick="setKnown({{ device.id }}, true)">&#x2705; Lista blanca</button>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="device-meta">
+        <span><strong>IP:</strong> {{ device.ip or '—' }}</span>
+        <span><strong>MAC:</strong> {{ device.mac }}</span>
+        <span><strong>Fabricante:</strong> {{ device.vendor or 'Desconocido' }}</span>
+        {% if device.hostname %}<span><strong>Host:</strong> {{ device.hostname }}</span>{% endif %}
+        {% if device.mdns_name %}<span><strong>mDNS:</strong> {{ device.mdns_name }}</span>{% endif %}
+        {% if device.os_detected %}
+        <span><strong>OS:</strong> {{ device.os_detected }} ({{ device.os_confidence }}%)</span>
+        {% endif %}
+        <span><strong>Visto por 1ª vez:</strong> {{ device.first_seen.strftime('%d/%m/%Y %H:%M') if device.first_seen }}</span>
+        <span><strong>Última vez:</strong> {{ device.last_seen.strftime('%d/%m/%Y %H:%M') if device.last_seen }}</span>
+      </div>
+
+      {% if device.bandwidth_limit > 0 %}
+      <div class="bandwidth-badge">&#x23F1; Límite: {{ device.bandwidth_limit }} kbps</div>
+      {% endif %}
+    </div>
+  </div>
+  {% else %}
+  <div class="empty-state">No hay dispositivos registrados. Ejecuta un escaneo para comenzar.</div>
+  {% endfor %}
+</div>
+
+<!-- Edit device modal content (populated by JS) -->
+{% endblock %}
+
+{% block scripts %}
+<script>
+  initDevicesPage();
+</script>
+{% endblock %}
